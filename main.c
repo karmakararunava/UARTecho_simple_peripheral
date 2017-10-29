@@ -1,8 +1,8 @@
 /******************************************************************************
 
- @file      main.c
+ @file  main.c
 
- @brief     main entry of the BLE stack sample application.
+ @brief main entry of the BLE stack sample application.
 
  Group: WCS, BTS
  Target Device: CC2650, CC2640, CC1350
@@ -79,9 +79,41 @@ bleUserCfg_t user0Cfg = BLE_USER_CFG;
 #include <inc/hw_prcm.h>
 #endif // USE_FPGA
 
+
+
+// new added for uart starts here
+
+// XDCtools Header files
+//#include <xdc/std.h>
+#include <xdc/runtime/System.h>
+
+// BIOS Header files
+//#include <ti/sysbios/BIOS.h>
+#include <ti/sysbios/knl/Task.h>
+
+// TI-RTOS Header files
+//#include <ti/drivers/PIN.h>
+#include <ti/drivers/UART.h>
+
+// new added for uart ends here
+
+
+
+
 /*******************************************************************************
  * MACROS
  */
+
+
+
+// new added for uart starts here
+
+#define TASKSTACKSIZE 768
+
+// new added for uart ends here
+
+
+
 
 /*******************************************************************************
  * CONSTANTS
@@ -104,9 +136,34 @@ bleUserCfg_t user0Cfg = BLE_USER_CFG;
  * LOCAL VARIABLES
  */
 
+
+
+// new added for uart starts here
+
+Task_Struct task0Struct;
+Char task0Stack[TASKSTACKSIZE];
+
+// new added for uart ends here
+
+
+
+
+
 /*******************************************************************************
  * GLOBAL VARIABLES
  */
+
+
+
+// new added for uart starts here
+
+// Global memory storage for a PIN_Config table
+static PIN_State ledPinState;
+
+// new added for uart ends here
+
+
+
 
 #ifdef CC1350_LAUNCHXL
 #ifdef POWER_SAVING
@@ -126,6 +183,25 @@ PIN_Config radCtrlCfg[] =
 PIN_Handle radCtrlHandle;
 #endif //CC1350_LAUNCHXL
 
+
+
+// new added for uart starts here
+
+/*
+ * Application LED pin configuration table:
+ *   - All LEDs board LEDs are off.
+ */
+
+PIN_Config ledPinTable[] = {
+    Board_LED1 | PIN_GPIO_OUTPUT_EN | PIN_GPIO_LOW | PIN_PUSHPULL | PIN_DRVSTR_MAX,
+    PIN_TERMINATE
+};
+
+// new added for uart ends here
+
+
+
+
 /*******************************************************************************
  * EXTERNS
  */
@@ -133,6 +209,49 @@ PIN_Handle radCtrlHandle;
 extern void AssertHandler(uint8 assertCause, uint8 assertSubcause);
 
 extern Display_Handle dispHandle;
+
+
+
+// new added for uart starts here
+
+/*
+ *  ======== echoFxn ========
+ *  Task for this function is created statically. See the project's .cfg file.
+ */
+
+Void echoFxn(UArg arg0, UArg arg1)
+{
+    char input;
+    UART_Handle uart;
+    UART_Params uartParams;
+    const char echoPrompt[] = "\fEchoing characters:\r\n";
+
+    // Create a UART with data processing off.
+    UART_Params_init(&uartParams);
+    uartParams.writeDataMode = UART_DATA_BINARY;
+    uartParams.readDataMode = UART_DATA_BINARY;
+    uartParams.readReturnMode = UART_RETURN_FULL;
+    uartParams.readEcho = UART_ECHO_OFF;
+    uartParams.baudRate = 9600;
+    uart = UART_open(Board_UART0, &uartParams);
+
+    if (uart == NULL) {
+        System_abort("Error opening the UART");
+    }
+
+    UART_write(uart, echoPrompt, sizeof(echoPrompt));
+
+    // Loop forever echoing
+    while (1) {
+        UART_read(uart, &input, 1);
+        UART_write(uart, &input, 1);
+    }
+}
+
+// new added for uart ends here
+
+
+
 
 /*******************************************************************************
  * @fn          Main
@@ -156,7 +275,23 @@ int main()
   HWREG(PRCM_BASE + PRCM_O_PDCTL1) &= ~PRCM_PDCTL1_RFC_ON;
 #endif // USE_FPGA
   
-  /* Register Application callback to trap asserts raised in the Stack */
+
+
+  // new added for uart starts here
+
+  PIN_Handle ledPinHandle;
+  Task_Params taskParams;
+
+  // Call board init functions
+  //Board_initGeneral();
+  Board_initUART();
+
+  // new added for uart ends here
+
+
+
+
+  // Register Application callback to trap asserts raised in the Stack
   RegisterAssertCback(AssertHandler);
 
   PIN_init(BoardGpioInitTable);
@@ -185,20 +320,47 @@ int main()
   VIMSModeSet(VIMS_BASE, VIMS_MODE_ENABLED);
 
 #if !defined( POWER_SAVING ) || defined( USE_FPGA )
-  /* Set constraints for Standby, powerdown and idle mode */
+  // Set constraints for Standby, powerdown and idle mode
   // PowerCC26XX_SB_DISALLOW may be redundant
   Power_setConstraint(PowerCC26XX_SB_DISALLOW);
   Power_setConstraint(PowerCC26XX_IDLE_PD_DISALLOW);
 #endif // POWER_SAVING | USE_FPGA
 
-  /* Initialize ICall module */
+  // Initialize ICall module
   ICall_init();
 
-  /* Start tasks of external images - Priority 5 */
+  // Start tasks of external images - Priority 5
   ICall_createRemoteTasks();
 
-  /* Kick off profile - Priority 3 */
+  // Kick off profile - Priority 3
   GAPRole_createTask();
+
+
+
+  // new added for uart starts here
+
+
+  // Open LED pins
+  ledPinHandle = PIN_open(&ledPinState, ledPinTable);
+  if(!ledPinHandle) {
+      System_abort("Error initializing board LED pins\n");
+  }
+
+
+  // Construct BIOS objects
+  Task_Params_init(&taskParams);
+  taskParams.stackSize = TASKSTACKSIZE;
+  taskParams.stack = &task0Stack;
+  Task_construct(&task0Struct, (Task_FuncPtr)echoFxn, &taskParams, NULL);
+  
+
+  // high on green LED
+  PIN_setOutputValue (ledPinHandle, Board_LED1, 1);
+
+
+  // new added for uart ends here
+
+
 
   SimpleBLEPeripheral_createTask();
 
